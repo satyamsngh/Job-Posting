@@ -16,11 +16,11 @@ func (s *Store) CreatCompanies(ctx context.Context, nc models.NewComapanies, Use
 		Jobs:        nc.Jobs,
 	}
 
-	com, err := s.UserRepo.CreateCompany(ctx, com)
+	company, err := s.UserRepo.CreateCompany(ctx, com)
 	if err != nil {
 		return models.Companies{}, err
 	}
-	return com, nil
+	return company, nil
 }
 
 func (s *Store) ViewCompanies(ctx context.Context, companyID string) ([]models.Companies, error) {

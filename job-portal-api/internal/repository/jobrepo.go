@@ -68,13 +68,12 @@ func (r *Repo) CreateCompany(ctx context.Context, companyData models.Companies) 
 
 func (r *Repo) ViewCompanies(ctx context.Context) ([]models.Companies, error) {
 	var comp = make([]models.Companies, 0, 10)
-	var companies = make([]models.Companies, 0, 10)
-	r.DB.Find(&comp)
-	for _, company := range comp {
-		companies = append(companies, company)
-
+	result := r.DB.Find(&comp)
+	if result.Error != nil {
+		return []models.Companies{}, result.Error
 	}
-	return companies, nil
+
+	return comp, nil
 }
 
 func (r *Repo) ViewCompanyById(ctx context.Context, cid uint) ([]models.Companies, error) {
