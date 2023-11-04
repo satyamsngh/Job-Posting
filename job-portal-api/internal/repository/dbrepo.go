@@ -9,7 +9,7 @@ func (r *Repo) AutoMigrate() error {
 		return err
 	}
 
-	err = r.DB.Migrator().AutoMigrate(&models.User{}, &models.Companies{})
+	err = r.DB.Migrator().AutoMigrate(&models.User{}, &models.Companies{}, models.Job{})
 	if err != nil {
 		// If there is an error while migrating, log the error message and stop the program
 		return err

@@ -353,3 +353,246 @@ func TestStore_CreateJob(t *testing.T) {
 		})
 	}
 }
+
+func TestStore_ListJobs(t *testing.T) {
+	type args struct {
+		ctx       context.Context
+		companyID uint
+		userid    string
+	}
+	tests := []struct {
+		name        string
+		args        args
+		want        []models.Job
+		wantErr     bool
+		mockNewRepo func() ([]models.Job, error)
+	}{
+		{
+			name: "Error",
+			args: args{
+				ctx:       context.Background(),
+				companyID: 1,
+				userid:    "2",
+			},
+			want:    []models.Job{},
+			wantErr: true,
+			mockNewRepo: func() ([]models.Job, error) {
+				return []models.Job{}, errors.New("database error")
+			},
+		},
+		{
+			name: "Ok",
+			args: args{
+				ctx:       context.Background(),
+				companyID: 1,
+				userid:    "2",
+			},
+			want: []models.Job{
+				{
+					Title:       "SDE",
+					Description: "go",
+					CompanyID:   1,
+				},
+				{
+					Title:       "frontend",
+					Description: "go",
+					CompanyID:   1,
+				},
+			},
+			wantErr: false,
+			mockNewRepo: func() ([]models.Job, error) {
+				return []models.Job{
+					{
+						Title:       "SDE",
+						Description: "go",
+						CompanyID:   1,
+					},
+					{
+						Title:       "frontend",
+						Description: "go",
+						CompanyID:   1,
+					},
+				}, nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := gomock.NewController(t)
+			mockRepo := repository.NewMockUserRepo(mock)
+			if tt.mockNewRepo != nil {
+				mockRepo.EXPECT().ViewJobByCompanyId(tt.args.ctx, tt.args.companyID).Return(tt.mockNewRepo()).AnyTimes()
+			}
+			s, err := NewStore(mockRepo)
+			if err != nil {
+				log.Err(err)
+				return
+			}
+
+			got, err := s.ListJobs(tt.args.ctx, tt.args.companyID, tt.args.userid)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ListJobs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ListJobs() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStore_AllJob(t *testing.T) {
+	type args struct {
+		ctx    context.Context
+		userId string
+	}
+	tests := []struct {
+		name        string
+		args        args
+		want        []models.Job
+		wantErr     bool
+		mockNewRepo func() ([]models.Job, error)
+	}{
+		{
+			name: "Error",
+			args: args{
+				ctx:    context.Background(),
+				userId: "1",
+			},
+			want:    []models.Job{},
+			wantErr: true,
+			mockNewRepo: func() ([]models.Job, error) {
+				return []models.Job{}, errors.New("database error")
+			},
+		},
+		{
+			name: "OK",
+			args: args{
+				ctx:    context.Background(),
+				userId: "1",
+			},
+			want: []models.Job{
+				{
+					Title:       "hr",
+					Description: "4 year ex",
+					CompanyID:   1,
+				},
+				{
+					Title:       "hr",
+					Description: "43year ex",
+					CompanyID:   1,
+				},
+			},
+			wantErr: false,
+			mockNewRepo: func() ([]models.Job, error) {
+				return []models.Job{
+					{
+						Title:       "hr",
+						Description: "4 year ex",
+						CompanyID:   1,
+					},
+					{
+						Title:       "hr",
+						Description: "43year ex",
+						CompanyID:   1,
+					},
+				}, nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := gomock.NewController(t)
+			mockRepo := repository.NewMockUserRepo(mock)
+			if tt.mockNewRepo != nil {
+				mockRepo.EXPECT().FindAllJobs(gomock.Any()).Return(tt.mockNewRepo()).AnyTimes()
+			}
+			s, err := NewStore(mockRepo)
+			if err != nil {
+				log.Err(err)
+				return
+			}
+			got, err := s.AllJob(tt.args.ctx, tt.args.userId)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AllJob() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("AllJob() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStore_AllJob1(t *testing.T) {
+	type args struct {
+		ctx    context.Context
+		jobID  uint64
+		userId string
+	}
+	tests := []struct {
+		name        string
+		args        args
+		want        models.Job
+		wantErr     bool
+		mockNewRepo func() (models.Job, error)
+	}{
+		{
+			name: "Error",
+			args: args{
+				ctx:    context.Background(),
+				jobID:  1,
+				userId: "1",
+			},
+			want:    models.Job{},
+			wantErr: true,
+			mockNewRepo: func() (models.Job, error) {
+				return models.Job{}, errors.New("database error")
+			},
+		},
+		{
+			name: "OK",
+			args: args{
+				ctx:    context.Background(),
+				jobID:  1,
+				userId: "1",
+			},
+			want: models.Job{
+
+				Title:       "hr",
+				Description: "4 year ex",
+				CompanyID:   1,
+			},
+			wantErr: false,
+			mockNewRepo: func() (models.Job, error) {
+				return models.Job{
+					Title:       "hr",
+					Description: "4 year ex",
+					CompanyID:   1,
+				}, nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := gomock.NewController(t)
+			mockRepo := repository.NewMockUserRepo(mock)
+			if tt.mockNewRepo != nil {
+				mockRepo.EXPECT().ViewJobDetailsById(gomock.Any(), gomock.Any()).Return(tt.mockNewRepo()).AnyTimes()
+			}
+			s, err := NewStore(mockRepo)
+			if err != nil {
+				log.Err(err)
+				return
+			}
+			got, err := s.JobsByID(tt.args.ctx, tt.args.jobID, tt.args.userId)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AllJob() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("AllJob() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -26,5 +26,5 @@ type Job struct {
 	gorm.Model
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	CompanyID   uint   `json:"company_id"`
+	CompanyID   uint   `json:"CompanyID"`
 }

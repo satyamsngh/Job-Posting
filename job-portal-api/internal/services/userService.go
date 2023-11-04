@@ -17,7 +17,6 @@ func (s *Store) CreateUser(ctx context.Context, nu models.NewUser) (models.User,
 	if err != nil {
 		return models.User{}, fmt.Errorf("generating password hash: %w", err)
 	}
-
 	u := models.User{
 		Name:         nu.Name,
 		Email:        nu.Email,

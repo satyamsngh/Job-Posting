@@ -11,19 +11,19 @@ import (
 	"time"
 )
 
-func API(a *auth.Auth, c repository.UserRepo) (*gin.Engine, error) {
+func API(a *auth.Auth, c repository.UserRepo) *gin.Engine {
 	r := gin.New()
 
 	m, err := middlewares.NewMid(a)
 	if err != nil {
 		log.Error().Err(err).Msg("Error setting up middlewares")
-		return nil, err
+		return nil
 	}
 
 	ms, err := services.NewStore(c)
 	if err != nil {
 		log.Error().Err(err).Msg("Error setting up services")
-		return nil, err
+		return nil
 	}
 
 	h := handler{
@@ -32,7 +32,6 @@ func API(a *auth.Auth, c repository.UserRepo) (*gin.Engine, error) {
 	}
 
 	r.Use(m.Log(), gin.Recovery())
-
 	r.GET("api/check", m.Authenticate(check))
 	r.POST("api/register", h.Register)
 	r.POST("api/login", h.Login)
@@ -44,7 +43,7 @@ func API(a *auth.Auth, c repository.UserRepo) (*gin.Engine, error) {
 	r.GET("api/jobs", m.Authenticate(h.AllJobs))
 	r.GET("/api/jobs/:jobID", m.Authenticate(h.JobsByID))
 
-	return r, nil
+	return r
 }
 
 func check(c *gin.Context) {

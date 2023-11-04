@@ -68,7 +68,6 @@ func startApp() error {
 	if err != nil {
 		return fmt.Errorf("Database is not connected: %w ", err)
 	}
-
 	repo, err := repository.NewRepository(db)
 	if err != nil {
 		log.Print("err")
