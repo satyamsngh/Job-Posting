@@ -3,11 +3,10 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 	"gorm.io/gorm"
 	"job-portal-api/internal/auth"
@@ -20,711 +19,725 @@ import (
 	"time"
 )
 
-func TestViewCompanies(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
-	// MockUser struct initialization
-	mockCompanies := []models.Companies{
-		{
-			Model: gorm.Model{
-				ID:        1,
-				CreatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-				UpdatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-			},
-			CompanyName: "infy",
-			FoundedYear: 2019,
-			Location:    "banglore",
-			UserId:      1,
-			Address:     "blndr",
-		},
-		// Add more sample companies if needed.
-	}
-	// Define the list of test cases
-	testCases := []struct {
-		name              string                        // Name of the test case
-		expectedStatus    int                           // Expected status of the response
-		expectedResponse  string                        // Expected response body
-		expectedCompanies []models.Companies            // Expected user after signup
-		mockService       func(m *services.MockService) // Mock service function
+func Test_handler_AddCompanies(t *testing.T) {
+
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:              "OK",
-			expectedStatus:    200,
-			expectedResponse:  `{"companies list":[{"ID":1,"CreatedAt":"2006-01-01T01:01:01.000000001Z","UpdatedAt":"2006-01-01T01:01:01.000000001Z","DeletedAt":null,"company_name":"infy","founded_year":2019,"location":"banglore","user_id":1,"address":"blndr"}]}`,
-			expectedCompanies: mockCompanies,
-			mockService: func(m *services.MockService) {
-				m.EXPECT().ViewCompanies(gomock.Any(), gomock.Any()).Times(1).
-					Return(mockCompanies, nil)
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				c.Request = httpRequest
+
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"error":"Internal Server Error"}`,
 		},
 		{
-			name:              "Error",
-			expectedStatus:    400,
-			expectedResponse:  `{"msg":"problem in viewing company"}`,
-			expectedCompanies: nil,
-			mockService: func(m *services.MockService) {
-				m.EXPECT().ViewCompanies(gomock.Any(), gomock.Any()).Times(1).
-					Return(nil, errors.New("internal server error"))
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
 			},
-		},
-	}
-
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
-
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.GET("/api/companies", h.ViewCompanies)
-
-			// Create a new HTTP GET request to "/api/companies".
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/companies", nil)
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
-		})
-	}
-}
-
-func TestViewCompaniesById(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
-
-	// MockUser struct initialization
-	mockCompanies := []models.Companies{
-		{
-			Model: gorm.Model{
-				ID:        1,
-				CreatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-				UpdatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-			},
-			CompanyName: "infy",
-			FoundedYear: 2019,
-			Location:    "banglore",
-			UserId:      1,
-			Address:     "blndr",
-		},
-		// Add more sample companies if needed.
-	}
-	// Define the list of test cases
-	testCases := []struct {
-		name              string // Name of the test case
-		body              any
-		expectedStatus    int // Expected status of the response
-		expectedResponse  string
-		expectedcompanies []models.Companies            // Expected response body 		// Expected user after signup
-		mockService       func(m *services.MockService) // Mock service function
-	}{
-		{
-			name:           "OK",
-			body:           mockCompanies,
-			expectedStatus: 200,
-
-			expectedResponse: `[{"ID":1,"CreatedAt":"2006-01-01T01:01:01.000000001Z","UpdatedAt":"2006-01-01T01:01:01.000000001Z","DeletedAt":null,"company_name":"infy","founded_year":2019,"location":"banglore","user_id":1,"address":"blndr"}]`,
-			mockService: func(m *services.MockService) {
-
-				m.EXPECT().ViewCompaniesById(gomock.Any(), gomock.Any(), gomock.Any()).
-					Times(1).
-					Return(mockCompanies, nil)
-
-			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
 		},
 		{
-			name: "Error - Company Not Found",
-			body: []models.Companies{
-				{
-					Model: gorm.Model{
-						ID: 5,
+			name: "invalid request body",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{"invalid`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
 
-						CreatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-						UpdatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-					},
-					CompanyName: "infy",
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "error while creating",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{"name":"Software Engineer","salary":"$100,000","location":"San Francisco"}`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().CreatCompanies(c.Request.Context(), gomock.Any(), gomock.Any()).Return(models.Companies{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusBadRequest,
+			expectedResponse:   `{"msg":"please provide all deatails"}`,
+		},
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpReq, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`"CompanyName":"Tek","FoundedYear":2019,"Location":"bnglr","UserId":1,"Address":"blndr","Jobs":null}`))
+				ctx := httpReq.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{Subject: "1"})
+				httpReq = httpReq.WithContext(ctx)
+				c.Request = httpReq
+
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().CreatCompanies(c.Request.Context(), gomock.Any(), "1").Return(models.Companies{
+					Model:       gorm.Model{ID: 1, CreatedAt: time.Date(2022, time.January, 1, 12, 34, 56, 0, time.UTC), UpdatedAt: time.Date(2022, time.January, 1, 12, 34, 56, 0, time.UTC)},
+					CompanyName: "Tek",
 					FoundedYear: 2019,
-					Location:    "banglore",
+					Location:    "bnglr",
 					UserId:      1,
 					Address:     "blndr",
-				},
-				// Add more sample companies if needed.
+					Jobs:        nil,
+				}, nil).AnyTimes()
+
+				return c, rr, ms
 			},
-			expectedStatus:   400,
-			expectedResponse: `{"msg":"problem in fetching company details"}`,
-			mockService: func(m *services.MockService) {
-				m.EXPECT().ViewCompaniesById(gomock.Any(), gomock.Any(), gomock.Any()).
-					Times(1).Return(nil, errors.New(""))
-			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
 		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
-
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.GET("/api/companies/:companyID", h.ViewCompaniesById)
-
-			// Create a new HTTP POST equest to "/signup".
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/companies/1", nil)
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
+			h := &handler{
+				s: ms,
+			}
+			h.AddCompanies(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }
 
-func TestHandler_CreateJob(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
-
-	// Define the input data for creating a job
-	jobData := models.Job{
-		Title:       "Software Engineer",
-		Description: "Senior",
-		CompanyID:   1,
-	}
-
-	// Define the list of test cases
-	testCases := []struct {
-		name             string                        // Name of the test case
-		expectedStatus   int                           // Expected status of the response
-		expectedResponse string                        // Expected response body
-		mockService      func(m *services.MockService) // Mock service function
+func Test_handler_ViewCompanies(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:           "OK",
-			expectedStatus: 201,
-			// You can adjust the expected response based on your application's actual response format.
-			expectedResponse: `{"ID":0,"CreatedAt":"0001-01-01T00:00:00Z","UpdatedAt":"0001-01-01T00:00:00Z","DeletedAt":null,"title":"Software Engineer","description":"Senior","company_id":1}`,
-			// Function for mocking service.
-			// This simulates CreateJob service and its return value.
-			mockService: func(m *services.MockService) {
-				m.EXPECT().CreateJob(gomock.Any(), gomock.Any(), gomock.Any()).Times(1).
-					Return(jobData, nil)
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				c.Request = httpRequest
+
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "error while fetching company from service",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().ViewCompanies(c.Request.Context(), "").Return([]models.Companies{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusBadRequest,
+			expectedResponse:   `{"msg":"problem in viewing company"}`,
+		},
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().ViewCompanies(c.Request.Context(), "").Return([]models.Companies{}, nil).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusOK,
+			expectedResponse:   `{"companies list":[]}`,
 		},
 	}
 
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.POST("/companies/:companyID/jobs", h.CreateJob)
-
-			// Serialize jobData to JSON and create a request body
-			reqBody, _ := json.Marshal(jobData)
-
-			// Create a new HTTP POST request to "/createjob".
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/companies/1/jobs", bytes.NewReader(reqBody))
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
+			h := &handler{
+				s: ms,
+			}
+			h.ViewCompanies(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }
-func TestAllJobs(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
-	// MockUser struct initialization
-	mockJob := []models.Job{
-		{
-			Model: gorm.Model{
-				ID:        1,
-				CreatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-				UpdatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-			},
-			Title:       "Software Engineer",
-			Description: "Senior",
-			CompanyID:   1,
-		},
-		// Add more sample companies if needed.
-	}
-	// Define the list of test cases
-	testCases := []struct {
-		name              string                        // Name of the test case
-		expectedStatus    int                           // Expected status of the response
-		expectedResponse  string                        // Expected response body
-		expectedCompanies []models.Job                  // Expected user after signup
-		mockService       func(m *services.MockService) // Mock service function
+
+func Test_handler_ViewCompaniesById(t *testing.T) {
+
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:              "OK",
-			expectedStatus:    200,
-			expectedResponse:  `[{"ID":1,"CreatedAt":"2006-01-01T01:01:01.000000001Z","UpdatedAt":"2006-01-01T01:01:01.000000001Z","DeletedAt":null,"title":"Software Engineer","description":"Senior","company_id":1}]`,
-			expectedCompanies: mockJob,
-			mockService: func(m *services.MockService) {
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				c.Request = httpRequest
 
-				m.EXPECT().AllJob(gomock.Any(), gomock.Any()).Times(1).
-					Return(mockJob, nil)
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "error while fetching jobs from service",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().ViewCompaniesById(c.Request.Context(), gomock.Any(), gomock.Any()).Return([]models.Companies{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusBadRequest,
+			expectedResponse:   `{"error":"Invalid company ID"}`,
+		},
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				c.Params = append(c.Params, gin.Param{Key: "companyID", Value: "123"})
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().ViewCompaniesById(c.Request.Context(), gomock.Any(), gomock.Any()).Return([]models.Companies{}, nil).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusOK,
+			expectedResponse:   `[]`,
 		},
 	}
 
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.GET("/jobs", h.AllJobs)
-
-			// Create a new HTTP POST request to "/signup".
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/jobs", nil)
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
+			h := &handler{
+				s: ms,
+			}
+			h.ViewCompaniesById(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }
-func TestJobsById(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
-	// MockUser struct initialization
-	mockJobs := []models.Job{
-		{
-			Model: gorm.Model{
-				ID:        1,
-				CreatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-				UpdatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-			},
-			Title:       "Software Engineer",
-			Description: "Senior",
-			CompanyID:   1,
-		},
-		// Add more sample companies if needed.
-	}
-	// Define the list of test cases
-	testCases := []struct {
-		name             string                        // Name of the test case
-		expectedStatus   int                           // Expected status of the response
-		expectedResponse string                        // Expected response body 		// Expected user after signup
-		mockService      func(m *services.MockService) // Mock service function
+
+func Test_handler_CreateJob(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:             "OK",
-			expectedStatus:   200,
-			expectedResponse: `[{"ID":1,"CreatedAt":"2006-01-01T01:01:01.000000001Z","UpdatedAt":"2006-01-01T01:01:01.000000001Z","DeletedAt":null,"title":"Software Engineer","description":"Senior","company_id":1}]`,
-			mockService: func(m *services.MockService) {
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				c.Request = httpRequest
 
-				m.EXPECT().JobsById(gomock.Any(), gomock.Any(), gomock.Any()).
-					Times(1).
-					Return(mockJobs, nil)
-
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "invalid request body",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{"invalid`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				c.Params = append(c.Params, gin.Param{Key: "companyID", Value: "123"})
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusBadRequest,
+			expectedResponse:   `{"error":"Invalid request body"}`,
+		},
+		{
+			name: "error while creating job posting",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{}`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				c.Params = append(c.Params, gin.Param{Key: "companyID", Value: "123"})
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().CreateJob(c.Request.Context(), gomock.Any(), gomock.Any()).Return(models.Job{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"error":"Failed to create job"}`,
+		},
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{}`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				c.Params = append(c.Params, gin.Param{Key: "companyID", Value: "123"})
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().CreateJob(c.Request.Context(), gomock.Any(), gomock.Any()).Return(models.Job{
+					Model: gorm.Model{ID: 1, CreatedAt: time.Date(2022, time.January, 1, 12, 34, 56, 0, time.UTC), UpdatedAt: time.Date(2022, time.January, 1, 12, 34, 56, 0, time.UTC)},
+				}, nil).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: 201,
+			expectedResponse:   `{"ID":1,"CreatedAt":"2022-01-01T12:34:56Z","UpdatedAt":"2022-01-01T12:34:56Z","DeletedAt":null,"title":"","description":"","CompanyID":0}`,
 		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
-
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.GET("/api/jobs/:jobID", h.JobsByID)
-
-			// Create a new HTTP POST equest to "/signup".
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/jobs/1", nil)
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
+			h := &handler{
+				s: ms,
+			}
+			h.CreateJob(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }
-func TestHandler_CreateCompany(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
 
-	// Define the input data for creating a job
-	jobData := models.Companies{
-		CompanyName: "infy",
-		FoundedYear: 2019,
-		Location:    "banglore",
-		UserId:      1,
-		Address:     "blndr",
-	}
-
-	// Define the list of test cases
-	testCases := []struct {
-		name             string                        // Name of the test case
-		expectedStatus   int                           // Expected status of the response
-		expectedResponse string                        // Expected response body
-		mockService      func(m *services.MockService) // Mock service function
+func Test_handler_AllJobs(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:           "OK",
-			expectedStatus: 200,
-			// You can adjust the expected response based on your application's actual response format.
-			expectedResponse: `{"ID":0,"CreatedAt":"0001-01-01T00:00:00Z","UpdatedAt":"0001-01-01T00:00:00Z","DeletedAt":null,"company_name":"infy","founded_year":2019,"location":"banglore","user_id":1,"address":"blndr"}`,
-			// Function for mocking service.
-			// This simulates CreateJob service and its return value.
-			mockService: func(m *services.MockService) {
-				m.EXPECT().CreatCompanies(gomock.Any(), gomock.Any(), gomock.Any()).Times(1).
-					Return(jobData, nil)
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				c.Request = httpRequest
+
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "error while fetching jobs from service",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().AllJob(c.Request.Context(), gomock.Any()).Return([]models.Job{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: 500,
+			expectedResponse:   `{"error":"Failed to fetch jobs"}`,
+		},
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().AllJob(c.Request.Context(), gomock.Any()).Return([]models.Job{}, nil).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusOK,
+			expectedResponse:   `[]`,
 		},
 	}
 
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.POST("/api/companies", h.AddCompanies)
-
-			// Serialize jobData to JSON and create a request body
-			reqBody, _ := json.Marshal(jobData)
-
-			// Create a new HTTP POST request to "/createjob".
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/companies", bytes.NewReader(reqBody))
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
+			h := &handler{
+				s: ms,
+			}
+			h.AllJobs(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }
-func TestViewJobById(t *testing.T) {
-	// Sets the Gin router mode to test.
-	gin.SetMode(gin.TestMode)
-	fakeClaims := jwt.RegisteredClaims{
-		Subject: "1",
-	}
-	// MockUser struct initialization
-	mockCompanies := []models.Job{
-		{
-			Model: gorm.Model{
-				ID:        1,
-				CreatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-				UpdatedAt: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC),
-			},
-			Title:       "Software Engineer",
-			Description: "Senior",
-			CompanyID:   1,
-		},
-		// Add more sample companies if needed.
-	}
-	// Define the list of test cases
-	testCases := []struct {
-		name             string                        // Name of the test case
-		expectedStatus   int                           // Expected status of the response
-		expectedResponse string                        // Expected response body 		// Expected user after signup
-		mockService      func(m *services.MockService) // Mock service function
+
+func Test_handler_ListJobs(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:             "OK",
-			expectedStatus:   200,
-			expectedResponse: `[{"ID":1,"CreatedAt":"2006-01-01T01:01:01.000000001Z","UpdatedAt":"2006-01-01T01:01:01.000000001Z","DeletedAt":null,"title":"Software Engineer","description":"Senior","company_id":1}]`,
-			mockService: func(m *services.MockService) {
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				c.Request = httpRequest
 
-				m.EXPECT().ListJobs(gomock.Any(), gomock.Any(), gomock.Any()).
-					Times(1).
-					Return(mockCompanies, nil)
-
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "error while fetching jobs from service",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().AllJob(c.Request.Context(), gomock.Any()).Return([]models.Job{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: 400,
+			expectedResponse:   `{"msg":"problem in viewing job"}`,
+		},
+
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{"name":"Software Engineer","salary":"$100,000","location":"San Francisco"}`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				c.Params = append(c.Params, gin.Param{Key: "companyID", Value: "123"})
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().ListJobs(c.Request.Context(), gomock.Any(), gomock.Any()).Return([]models.Job{
+					{
+						Model:       gorm.Model{ID: 1, CreatedAt: time.Date(2022, time.January, 1, 12, 34, 56, 0, time.UTC), UpdatedAt: time.Date(2022, time.January, 1, 12, 34, 56, 0, time.UTC)},
+						Title:       "sde",
+						Description: "hr",
+						CompanyID:   1,
+					},
+				}, nil).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusOK,
+			expectedResponse:   `[{"ID":1,"CreatedAt":"2022-01-01T12:34:56Z","UpdatedAt":"2022-01-01T12:34:56Z","DeletedAt":null,"title":"sde","description":"hr","CompanyID":1}]`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
+
+			h := &handler{
+				s: ms,
+			}
+			h.ListJobs(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
+		})
+	}
+}
+
+func Test_handler_JobsByID(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
+	}{
+		{
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "missing jwt claims",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedResponse:   `{"error":"Unauthorized"}`,
+		},
+		{
+			name: "error while fetching jobs from service",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().JobsByID(c.Request.Context(), gomock.Any(), gomock.Any()).Return(models.Job{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusBadRequest,
+			expectedResponse:   `{"error":"Invalid job ID"}`,
+		},
+		{
+			name: "success",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodGet, "http://test.com:8080", nil)
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				ctx = context.WithValue(ctx, auth.Key, jwt.RegisteredClaims{})
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+				c.Params = append(c.Params, gin.Param{Key: "jobID", Value: "123"})
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				ms.EXPECT().JobsByID(c.Request.Context(), gomock.Any(), gomock.Any()).Return(models.Job{}, nil).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: http.StatusOK,
+			expectedResponse:   `{"ID":0,"CreatedAt":"0001-01-01T00:00:00Z","UpdatedAt":"0001-01-01T00:00:00Z","DeletedAt":null,"title":"","description":"","CompanyID":0}`,
 		},
 	}
 
-	// Start a loop over `testCases` array where each element is represented by `tc`.
-	for _, tc := range testCases {
-		// Run a new test with the `tc.name` as its identifier.
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-			// Create a mock Inventory using the Gomock controller.
-			mockS := services.NewMockService(ctrl)
-
-			// Apply the mock to the user service.
-			tc.mockService(mockS)
-
-			// Create a new instance of `models.Service` with the mock service.
-			ms := services.NewStore(mockS)
-
-			// Create a new context. This is typically passed between functions
-			// carrying deadline, cancellation signals, and other request-scoped values.
-			ctx := context.Background()
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, auth.Key, fakeClaims)
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Create a new Gin router.
-			router := gin.New()
-
-			// Create a new handler which uses the service model.
-			h := handler{s: ms}
-
-			// Register an endpoint and its handler with the router.
-			router.GET("/api/companies/:companyID/list-jobs", h.ListJobs)
-
-			// Create a new HTTP POST equest to "/signup".
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/companies/1/list-jobs", nil)
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			resp := httptest.NewRecorder()
-
-			// Pass the HTTP request to the router. This effectively "performs" the request and gets the associated response.
-			router.ServeHTTP(resp, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, resp.Code)
-
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, string(resp.Body.Bytes()))
+			h := &handler{
+				s: ms,
+			}
+			h.JobsByID(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }

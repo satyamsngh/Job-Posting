@@ -20,7 +20,7 @@ func (h *handler) AddCompanies(c *gin.Context) {
 	traceId, ok := ctx.Value(middlewares.TraceIdKey).(string)
 	if !ok {
 		log.Error().Msg("traceId missing from context")
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"msg": http.StatusText(http.StatusInternalServerError)})
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": http.StatusText(http.StatusInternalServerError)})
 		return
 	}
 
@@ -188,7 +188,7 @@ func (h *handler) ListJobs(c *gin.Context) {
 	companyID, err := strconv.ParseUint(companyIDStr, 10, 64)
 	if err != nil {
 		log.Error().Err(err).Str("Trace Id", traceID)
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid company ID"})
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": "problem in viewing job"})
 		return
 	}
 

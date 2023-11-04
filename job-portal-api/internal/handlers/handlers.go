@@ -32,9 +32,9 @@ func API(a *auth.Auth, c repository.UserRepo) *gin.Engine {
 	}
 
 	r.Use(m.Log(), gin.Recovery())
-	r.GET("api/check", m.Authenticate(check))
-	r.POST("api/register", h.Register)
-	r.POST("api/login", h.Login)
+	r.GET("/api/check", m.Authenticate(check))
+	r.POST("/api/register", h.Register)
+	r.POST("/api/login", h.Login)
 	r.POST("/api/listcompanies", m.Authenticate(h.AddCompanies))
 	r.GET("/api/viewcompanies", m.Authenticate(h.ViewCompanies))
 	r.GET("/api/companies/:companyID", m.Authenticate(h.ViewCompaniesById))

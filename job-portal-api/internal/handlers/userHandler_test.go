@@ -3,114 +3,132 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/require"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
-	"gorm.io/gorm"
 	middlewares "job-portal-api/internal/middleware"
-	"job-portal-api/internal/models"
 	"job-portal-api/internal/services"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-func TestRegister(t *testing.T) {
-	// NewUser struct initialization
-	nu := models.NewUser{
-		Name:     "stym",
-		Email:    "stym@email.com",
-		Password: "password",
-	}
-	mockUser := models.User{
-		Model: gorm.Model{
-			ID: 1,
-		},
-		Name:         "satyam",
-		Email:        "satyam@email.com",
-		PasswordHash: "jaldlajjasdf",
-	}
-
-	tt := [...]struct {
-		name             string // Name of the test case
-		body             any    // Body to send to request
-		expectedStatus   int    // Expected status of the response
-		expectedResponse string // Expected response body
-		expectedUser     models.User
-		mockUserService  func(m *services.MockService)
+func Test_handler_Register(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
 	}{
 		{
-			name:             "OK",
-			body:             nu,
-			expectedStatus:   http.StatusOK,
-			expectedResponse: `{"ID":1,"CreatedAt":"0001-01-01T00:00:00Z","UpdatedAt":"0001-01-01T00:00:00Z","DeletedAt":null,"name":"satyam","email":"satyam@email.com"}`,
-			//set expectations inside it
-			mockUserService: func(m *services.MockService) {
-				m.EXPECT().CreateUser(gomock.Any(), gomock.Eq(nu)).
-					Times(1).Return(mockUser, nil)
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com", nil)
+				c.Request = httpRequest
 
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
 		},
 		{
-			name: "Fail_NoEmail",
-			body: models.NewUser{
-				Name:     "testuser",
-				Password: "password",
+			name: "invalid user data",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{}`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				return c, rr, nil
 			},
-			expectedStatus:   http.StatusBadRequest,
-			expectedResponse: `{"msg":"please provide Name, Email and Password"}`,
-			mockUserService: func(m *services.MockService) {
-				m.EXPECT().CreateUser(gomock.Any(), gomock.Any()).Times(0)
+			expectedStatusCode: http.StatusBadRequest,
+			expectedResponse:   `{"msg":"please provide Name, Email and Password"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
+
+			h := &handler{
+				s: ms,
+			}
+			h.Register(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
+		})
+	}
+}
+
+func Test_handler_Login(t *testing.T) {
+	tests := []struct {
+		name               string
+		setup              func() (*gin.Context, *httptest.ResponseRecorder, services.Service)
+		expectedStatusCode int
+		expectedResponse   string
+	}{
+
+		{
+			name: "missing trace id",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", nil)
+				c.Request = httpRequest
+
+				return c, rr, nil
 			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedResponse:   `{"msg":"Internal Server Error"}`,
+		},
+		{
+			name: "error during user login",
+			setup: func() (*gin.Context, *httptest.ResponseRecorder, services.Service) {
+				rr := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rr)
+
+				// Create a request with valid user login data
+				httpRequest, _ := http.NewRequest(http.MethodPost, "http://test.com:8080", bytes.NewBufferString(`{
+                "email": "testuser@example.com",
+                "password": "password123"
+             }`))
+				ctx := httpRequest.Context()
+				ctx = context.WithValue(ctx, middlewares.TraceIdKey, "123")
+				httpRequest = httpRequest.WithContext(ctx)
+				c.Request = httpRequest
+
+				// Create a mock UserService
+				mc := gomock.NewController(t)
+				ms := services.NewMockService(mc)
+
+				// Expect the UserLoginService to be called and return an error
+				ms.EXPECT().Authenticate(c.Request.Context(), gomock.Any(), gomock.Any()).Return(jwt.RegisteredClaims{}, errors.New("test service error")).AnyTimes()
+
+				return c, rr, ms
+			},
+			expectedStatusCode: 401,
+			expectedResponse:   `{"msg":"login failed"}`,
 		},
 	}
 
-	for _, tc := range tt {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new Gomock controller.
-			ctrl := gomock.NewController(t)
-			//this func give us the mock implementation of the interface
-			mockService := services.NewMockService(ctrl)
-			s := services.NewStore(mockService)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, rr, ms := tt.setup()
 
-			// Apply the mock to the user service.
-			tc.mockUserService(mockService)
-			// Create a new Gin router.
-			router := gin.New()
-			h := handler{
-				s: s,
+			h := &handler{
+				s: ms,
 			}
-			ctx := context.Background()
-			// Create a fake TraceID. This would typically be used for request tracing.
-			traceID := "fake-trace-id"
-			// Insert the TraceId into the context.
-			ctx = context.WithValue(ctx, middlewares.TraceIdKey, traceID)
-
-			// Register an endpoint and its handler with the router.
-			router.POST("/register", h.Register)
-
-			// Marshal `tc.body` into JSON so that it can be included in the HTTP request.
-			body, err := json.Marshal(tc.body)
-
-			// If the JSON marshaling fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP POST request to "/signup".
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/register", bytes.NewReader(body))
-
-			// If the request creation fails, raise an error and stop the test.
-			require.NoError(t, err)
-
-			// Create a new HTTP Response Recorder. This is used to capture the HTTP response for analysis.
-			rec := httptest.NewRecorder()
-
-			router.ServeHTTP(rec, req)
-
-			// Assert the returned HTTP status code is as expected.
-			require.Equal(t, tc.expectedStatus, rec.Code)
-			// Assert the response matches the expected response.
-			require.Equal(t, tc.expectedResponse, rec.Body.String())
+			h.Login(c)
+			assert.Equal(t, tt.expectedStatusCode, rr.Code)
+			assert.Equal(t, tt.expectedResponse, rr.Body.String())
 		})
 	}
 }
